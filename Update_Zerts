@@ -1,0 +1,75 @@
+#!/usr/bin/bash
+#### combined certbot renew and import to Apache and paloalto in one script here ####
+
+echo
+echo "#####################################   B E G I N  of  script   ############################################"
+echo
+echo
+echo "                                          "$(date +%d-%m-%y/%H:%M:%S)
+echo
+echo "############################################################################################################"
+echo
+echo
+
+### renew all Certificates ###
+echo "######################   BEGIN certbot RENEW   ################   "$(date +%d-%m-%y/%H:%M:%S)"   ####################"
+
+sudo /usr/bin/certbot renew --preferred-challenges http-01
+
+
+# Get Certs
+#sudo certbot certonly --webroot -w /var/www/  -d vpn.MYDOMAIN.net
+#sudo certbot certonly --webroot -w /var/www/  -d palo.MYDOMAIN.net
+
+
+echo
+echo "######################   OpenSSL export P12 Files   ###########   "$(date +%d-%m-%y/%H:%M:%S)"   ####################"
+echo
+#Export PKCS12 to homedir
+sudo openssl pkcs12 -export -in /etc/letsencrypt/live/vpn.MYDOMAIN.net/fullchain.pem -inkey /etc/letsencrypt/live/vpn.MYDOMAIN.net/privkey.pem -passout pass:PASS1234 -out /home/pi/vpn.MYDOMAIN.net.p12
+sudo openssl pkcs12 -export -in /etc/letsencrypt/live/palo.MYDOMAIN.net/fullchain.pem -inkey /etc/letsencrypt/live/palo.MYDOMAIN.net/privkey.pem -passout pass:PASS1234 -out /home/pi/palo.MYDOMAIN.net.p12
+sudo openssl pkcs12 -export -in /etc/letsencrypt/live/pi.MYDOMAIN.net/fullchain.pem -inkey /etc/letsencrypt/live/pi.MYDOMAIN.net/privkey.pem -passout pass:PASS1234 -out /home/pi/pi.MYDOMAIN.net.p12
+
+#change Permission
+sudo chown pi:pi /home/pi/*.p12
+
+#Upload to Palo
+
+echo
+echo
+echo "##- imported to Palo -##"
+echo
+echo "import vpn.MYDOMAIN.net"
+curl -F file=@/home/pi/vpn.MYDOMAIN.net.p12 -s -k 'https://PALO-IP/api/?type=import&category=keypair&certificatename=vpn__1&format=pkcs12&passphrase=PASS1234&key="API-KEY'
+
+echo "Import palo.MYDOMAIN.net"
+curl -F file=@/home/pi/palo.MYDOMAIN.net.p12 -s -k 'https://PALO-IP/api/?type=import&category=keypair&certificatename=palo_1&format=pkcs12&passphrase=PASS1234&key="API-KEY'
+
+echo "Import pi.MYDOMAIN.net"
+curl -F file=@/home/pi/pi.MYDOMAIN.net.p12 -s -k 'https://PALO-IP/api/?type=import&category=keypair&certificatename=pi___net&format=pkcs12&passphrase=PASS1234&key="API-KEY'
+
+
+echo
+echo "##- commit to Palo -##"
+echo
+#Commit
+curl -s -k -X GET 'https://PALO-IP/api/?type=commit&cmd=<commit><description>imported_LetsEnrypt_Web-Certificates</description></commit>&key="API-KEY"'
+
+
+echo
+echo "##- Remove p12 files -##"
+echo
+# Remove files from homedir
+rm -f /home/pi/*.p12
+
+echo
+echo "##- Change Certs in Grafana -''"
+echo
+# Copy Zerts to Grafana and restart Server
+sudo cp /etc/letsencrypt/live/pi.MYDOMAIN.net/privkey.pem /etc/grafana/
+sudo cp /etc/letsencrypt/live/pi.MYDOMAIN.net/cert.pem /etc/grafana/
+sudo chown grafana:grafana /etc/grafana/cert.pem
+sudo chown grafana:grafana /etc/grafana/privkey.pem
+sudo chmod 400 /etc/grafana/privkey.pem
+sudo chmod 400 /etc/grafana/cert.pem
+sudo service grafana-server restart
